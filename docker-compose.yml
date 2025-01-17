@@ -1,0 +1,155 @@
+services:
+  # -----------------------------------------------------
+  # 1) POSTGRESQL
+  # -----------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    container_name: iotapp_postgres
+    restart: always
+    #networks:
+      #- iot-network
+    environment:
+      TZ: Europe/Zurich
+      POSTGRES_USER: iotuser
+      POSTGRES_PASSWORD: iotpassword
+      #POSTGRES_DB: iotdb
+    volumes:
+      - ./postgres/postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+
+  # -----------------------------------------------------
+  # 2) INFLUXDB
+  # -----------------------------------------------------
+  influxdb:
+    image: influxdb:2-alpine
+    container_name: iotapp_influxdb
+    restart: always
+    #networks:
+      #- iot-network
+    environment:
+      TZ: Europe/Zurich
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword
+      DOCKER_INFLUXDB_INIT_ORG: MyOrg
+      DOCKER_INFLUXDB_INIT_BUCKET: iotBucket
+      # DOCKER_INFLUXDB_INIT_RETENTION: 30d
+    volumes:
+      - ./influx/influx_data:/var/lib/influxdb2
+      - ./influx/influx_config:/etc/influxdb2
+    ports:
+      - "8086:8086"
+
+  # -----------------------------------------------------
+  # 3) MOSQUITTO (MQTT BROKER)
+  # -----------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iotapp_mosquitto
+    restart: always
+    #networks:
+      #- iot-network
+    volumes:
+      - ./mosquitto/mosquitto_config:/mosquitto/config
+      - ./mosquitto/mosquitto_data:/mosquitto/data
+      - ./mosquitto/mosquitto_log:/mosquitto/log
+    ports:
+      - "1883:1883"   # MQTT
+      - "9001:9001"   # WebSocket MQTT (if needed)
+    # If you want to customize Mosquitto config:
+    # configs:
+    #   - source: mosquitto_custom_config
+    #     target: /mosquitto/config/mosquitto.conf
+
+  # -----------------------------------------------------
+  # 4) USER MANAGEMENT SERVICE
+  # -----------------------------------------------------
+  user-management-service:
+    build:
+      context: ../user-management-service #Path to dockerfile
+      dockerfile: Dockerfile
+    container_name: iotapp_user_management
+    restart: unless-stopped
+    #networks:
+      #- iot-network
+    depends_on:
+      - postgres
+    environment:
+      # Example environment variables for connecting to Postgres
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/iotdb
+      SPRING_DATASOURCE_USERNAME: iotuser
+      SPRING_DATASOURCE_PASSWORD: iotpassword
+      # Other environment variables as needed
+    ports:
+      - "8081:8080"  # Expose the service on host port 8081 for clarity
+
+  # -----------------------------------------------------
+  # 5) AUTH SERVICE
+  # -----------------------------------------------------
+  auth-service:
+    build: ./auth-service
+    container_name: iotapp_auth
+    restart: unless-stopped
+    #networks:
+      #- iot-network
+    depends_on:
+      - user-management-service
+      - postgres
+    environment:
+      # Adjust as needed
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/iotdb
+      SPRING_DATASOURCE_USERNAME: iotuser
+      SPRING_DATASOURCE_PASSWORD: iotpassword
+      # For validating users (if calling user-management-service):
+      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
+      # JWT settings, etc.
+      JWT_SECRET: "supersecretkey"
+    ports:
+      - "8082:8080"
+
+  # -----------------------------------------------------
+  # 6) DEVICE MANAGEMENT SERVICE
+  # -----------------------------------------------------
+  device-management-service:
+    build: ./device-management-service
+    container_name: iotapp_device_management
+    restart: unless-stopped
+    #networks:
+      #- iot-network
+    depends_on:
+      - mosquitto
+      - auth-service
+      - postgres
+    environment:
+      # If you store device info in Postgres
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/iotdb
+      SPRING_DATASOURCE_USERNAME: iotuser
+      SPRING_DATASOURCE_PASSWORD: iotpassword
+      # MQTT broker connection info
+      MQTT_BROKER_HOST: mosquitto
+      MQTT_BROKER_PORT: 1883
+      # Auth service if validating JWT
+      AUTH_SERVICE_URL: http://auth-service:8080
+    ports:
+      - "8083:8080"
+
+  # -----------------------------------------------------
+  # 7) DATA PROCESSING SERVICE
+  # -----------------------------------------------------
+  data-processing-service:
+    build: ./data-processing-service
+    container_name: iotapp_data_processing
+    restart: unless-stopped
+    #networks:
+      #- iot-network
+    depends_on:
+      - influxdb
+      - device-management-service
+    environment:
+      # InfluxDB connection info
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: "my-influxdb-token"  # InfluxDB 2.x
+      INFLUXDB_ORG: "MyOrg"               # InfluxDB 2.x
+      INFLUXDB_BUCKET: "iotBucket"        # InfluxDB 2.x

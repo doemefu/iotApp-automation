@@ -46,6 +46,12 @@ The initial project was a monolithic backend for an IoT application written in J
      - Providing data to the frontend and other services
    - **Communication:** Receives data from the Device Service, processes it, and provides APIs for accessing processed data.
 
+5. **MQTT Broker**
+   - **Language:** C
+   - **Description:** Handles registration and management of IoT devices, processes inbound data, and monitors device status.
+   - **Responsibilities:**
+       - Managing data Traffic between IoT devices
+
 ### Communication Between Modules
 - **REST APIs:** Used for communication between the frontend and services, and between services.
 - **JWT (JSON Web Token):** Used for secure authentication between services and users.
