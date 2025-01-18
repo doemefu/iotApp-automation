@@ -31,17 +31,38 @@ services:
     environment:
       TZ: Europe/Zurich
       DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword
-      DOCKER_INFLUXDB_INIT_ORG: MyOrg
+      DOCKER_INFLUXDB_INIT_USERNAME_FILE: /run/secrets/influxdb2-admin-username
+      DOCKER_INFLUXDB_INIT_PASSWORD_FILE: /run/secrets/influxdb2-admin-password
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN_FILE: /run/secrets/influxdb2-admin-token
+      DOCKER_INFLUXDB_INIT_ORG: IotApp
       DOCKER_INFLUXDB_INIT_BUCKET: iotBucket
       # DOCKER_INFLUXDB_INIT_RETENTION: 30d
+    secrets:
+      - influxdb2-admin-username
+      - influxdb2-admin-password
+      - influxdb2-admin-token
     volumes:
       - ./influx/influx_data:/var/lib/influxdb2
       - ./influx/influx_config:/etc/influxdb2
+      #- ./influx/init-scripts:/docker-entrypoint-initdb.d
     ports:
       - "8086:8086"
-
+  # -----------------------------------------------------
+  # 2.1) INFLUXDB SETUP SCRIPT
+  # -----------------------------------------------------
+  influx-init:
+    image: curlimages/curl:latest
+    depends_on:
+      - influxdb
+    command: [ "/bin/sh", "-c", "/create-buckets.sh" ]
+    volumes:
+      - ./scripts/create-buckets.sh:/create-buckets.sh
+    environment:
+      INFLUX_HOST: http://influxdb:8086
+      DOCKER_INFLUXDB_INIT_ORG: IotApp
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: /run/secrets/influxdb2-admin-token
+    secrets:
+      - influxdb2-admin-token
   # -----------------------------------------------------
   # 3) MOSQUITTO (MQTT BROKER)
   # -----------------------------------------------------
@@ -89,7 +110,9 @@ services:
   # 5) AUTH SERVICE
   # -----------------------------------------------------
   auth-service:
-    build: ./auth-service
+    build:
+      context: ../auth-service #Path to dockerfile
+      dockerfile: Dockerfile
     container_name: iotapp_auth
     restart: unless-stopped
     #networks:
@@ -99,13 +122,12 @@ services:
       - postgres
     environment:
       # Adjust as needed
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/iotdb
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/authdb
       SPRING_DATASOURCE_USERNAME: iotuser
       SPRING_DATASOURCE_PASSWORD: iotpassword
       # For validating users (if calling user-management-service):
       USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
       # JWT settings, etc.
-      JWT_SECRET: "supersecretkey"
     ports:
       - "8082:8080"
 
@@ -153,3 +175,12 @@ services:
       INFLUXDB_TOKEN: "my-influxdb-token"  # InfluxDB 2.x
       INFLUXDB_ORG: "MyOrg"               # InfluxDB 2.x
       INFLUXDB_BUCKET: "iotBucket"        # InfluxDB 2.x
+
+
+secrets:
+  influxdb2-admin-username:
+    file: ./influx/.env.influxdb2-admin-username
+  influxdb2-admin-password:
+    file: ./influx/.env.influxdb2-admin-password
+  influxdb2-admin-token:
+    file: ./influx/.env.influxdb2-admin-token
