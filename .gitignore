@@ -83,3 +83,4 @@ fabric.properties
 /influx/.env.influxdb2-admin-password
 /influx/.env.influxdb2-admin-token
 /influx/.env.influxdb2-admin-username
+/.env

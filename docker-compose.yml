@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   # -----------------------------------------------------
   # 1) POSTGRESQL
@@ -6,18 +8,18 @@ services:
     image: postgres:17-alpine
     container_name: iotapp_postgres
     restart: always
-    #networks:
-      #- iot-network
+      #networks:
+    #- iot-network
     environment:
-      TZ: Europe/Zurich
-      POSTGRES_USER: iotuser
-      POSTGRES_PASSWORD: iotpassword
-      #POSTGRES_DB: iotdb
+      TZ: ${TZ}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - ./postgres/postgres_data:/var/lib/postgresql/data
       - ./postgres/init-scripts:/docker-entrypoint-initdb.d
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
 
   # -----------------------------------------------------
   # 2) INFLUXDB
@@ -26,27 +28,24 @@ services:
     image: influxdb:2-alpine
     container_name: iotapp_influxdb
     restart: always
-    #networks:
-      #- iot-network
+      #networks:
+    #- iot-network
     environment:
-      TZ: Europe/Zurich
+      TZ: ${TZ}
       DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME_FILE: /run/secrets/influxdb2-admin-username
-      DOCKER_INFLUXDB_INIT_PASSWORD_FILE: /run/secrets/influxdb2-admin-password
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN_FILE: /run/secrets/influxdb2-admin-token
-      DOCKER_INFLUXDB_INIT_ORG: IotApp
-      DOCKER_INFLUXDB_INIT_BUCKET: iotBucket
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_USERNAME}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_BUCKET}
       # DOCKER_INFLUXDB_INIT_RETENTION: 30d
-    secrets:
-      - influxdb2-admin-username
-      - influxdb2-admin-password
-      - influxdb2-admin-token
     volumes:
       - ./influx/influx_data:/var/lib/influxdb2
       - ./influx/influx_config:/etc/influxdb2
       #- ./influx/init-scripts:/docker-entrypoint-initdb.d
     ports:
-      - "8086:8086"
+      - "${INFLUX_PORT}:8086"
+
   # -----------------------------------------------------
   # 2.1) INFLUXDB SETUP SCRIPT
   # -----------------------------------------------------
@@ -54,15 +53,14 @@ services:
     image: curlimages/curl:latest
     depends_on:
       - influxdb
-    command: [ "/bin/sh", "-c", "/create-buckets.sh" ]
+    command: ["/bin/sh", "-c", "/create-buckets.sh"]
     volumes:
       - ./scripts/create-buckets.sh:/create-buckets.sh
     environment:
-      INFLUX_HOST: http://influxdb:8086
-      DOCKER_INFLUXDB_INIT_ORG: IotApp
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: /run/secrets/influxdb2-admin-token
-    secrets:
-      - influxdb2-admin-token
+      INFLUX_HOST: ${INFLUX_HOST}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_ORG}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
+
   # -----------------------------------------------------
   # 3) MOSQUITTO (MQTT BROKER)
   # -----------------------------------------------------
@@ -70,15 +68,15 @@ services:
     image: eclipse-mosquitto:2
     container_name: iotapp_mosquitto
     restart: always
-    #networks:
-      #- iot-network
+      #networks:
+    #- iot-network
     volumes:
       - ./mosquitto/mosquitto_config:/mosquitto/config
       - ./mosquitto/mosquitto_data:/mosquitto/data
       - ./mosquitto/mosquitto_log:/mosquitto/log
     ports:
-      - "1883:1883"   # MQTT
-      - "9001:9001"   # WebSocket MQTT (if needed)
+      - "${MQTT_PORT}:1883"   # MQTT
+      - "${MQTT_WS_PORT}:9001"   # WebSocket MQTT (if needed)
     # If you want to customize Mosquitto config:
     # configs:
     #   - source: mosquitto_custom_config
@@ -93,18 +91,23 @@ services:
       dockerfile: Dockerfile
     container_name: iotapp_user_management
     restart: unless-stopped
-    #networks:
-      #- iot-network
+      #networks:
+    #- iot-network
     depends_on:
       - postgres
     environment:
       # Example environment variables for connecting to Postgres
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/iotdb
-      SPRING_DATASOURCE_USERNAME: iotuser
-      SPRING_DATASOURCE_PASSWORD: iotpassword
+      LOGGING_LEVEL_ROOT: DEBUG
+      SPRING_DATASOURCE_URL: jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      INFLUX_URL: ${INFLUX_HOST}
+      INFLUX_BUCKET: ${USER_MANAGEMENT_BUCKET}
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
       # Other environment variables as needed
     ports:
-      - "8081:8080"  # Expose the service on host port 8081 for clarity
+      - "${USER_MANAGEMENT_PORT}:8080"  # Expose the service on host port
 
   # -----------------------------------------------------
   # 5) AUTH SERVICE
@@ -115,21 +118,26 @@ services:
       dockerfile: Dockerfile
     container_name: iotapp_auth
     restart: unless-stopped
-    #networks:
-      #- iot-network
+      #networks:
+    #- iot-network
     depends_on:
       - user-management-service
       - postgres
     environment:
       # Adjust as needed
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/authdb
-      SPRING_DATASOURCE_USERNAME: iotuser
-      SPRING_DATASOURCE_PASSWORD: iotpassword
+      LOGGING_LEVEL_ROOT: DEBUG
+      SPRING_DATASOURCE_URL: jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${AUTH_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       # For validating users (if calling user-management-service):
-      USER_MANAGEMENT_SERVICE_URL: http://user-management-service:8080
+      USER_MANAGEMENT_SERVICE_URL: ${USER_MANAGEMENT_SERVICE_URL}
+      INFLUX_URL: ${INFLUX_HOST}
+      INFLUX_BUCKET: ${AUTH_SERVICE_BUCKET}
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
       # JWT settings, etc.
     ports:
-      - "8082:8080"
+      - "${AUTH_SERVICE_PORT}:8080"
 
   # -----------------------------------------------------
   # 6) DEVICE MANAGEMENT SERVICE
@@ -138,24 +146,24 @@ services:
     build: ./device-management-service
     container_name: iotapp_device_management
     restart: unless-stopped
-    #networks:
-      #- iot-network
+      #networks:
+    #- iot-network
     depends_on:
       - mosquitto
       - auth-service
       - postgres
     environment:
       # If you store device info in Postgres
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/iotdb
-      SPRING_DATASOURCE_USERNAME: iotuser
-      SPRING_DATASOURCE_PASSWORD: iotpassword
+      SPRING_DATASOURCE_URL: jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       # MQTT broker connection info
-      MQTT_BROKER_HOST: mosquitto
-      MQTT_BROKER_PORT: 1883
+      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST}
+      MQTT_BROKER_PORT: ${MQTT_PORT}
       # Auth service if validating JWT
-      AUTH_SERVICE_URL: http://auth-service:8080
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
     ports:
-      - "8083:8080"
+      - "${DEVICE_MANAGEMENT_PORT}:8080"
 
   # -----------------------------------------------------
   # 7) DATA PROCESSING SERVICE
@@ -164,23 +172,14 @@ services:
     build: ./data-processing-service
     container_name: iotapp_data_processing
     restart: unless-stopped
-    #networks:
-      #- iot-network
+      #networks:
+    #- iot-network
     depends_on:
       - influxdb
       - device-management-service
     environment:
       # InfluxDB connection info
-      INFLUXDB_URL: http://influxdb:8086
-      INFLUXDB_TOKEN: "my-influxdb-token"  # InfluxDB 2.x
-      INFLUXDB_ORG: "MyOrg"               # InfluxDB 2.x
-      INFLUXDB_BUCKET: "iotBucket"        # InfluxDB 2.x
-
-
-secrets:
-  influxdb2-admin-username:
-    file: ./influx/.env.influxdb2-admin-username
-  influxdb2-admin-password:
-    file: ./influx/.env.influxdb2-admin-password
-  influxdb2-admin-token:
-    file: ./influx/.env.influxdb2-admin-token
+      INFLUXDB_URL: ${INFLUX_URL}
+      INFLUXDB_TOKEN: ${INFLUX_TOKEN}
+      INFLUXDB_ORG: ${INFLUX_ORG}
+      INFLUXDB_BUCKET: ${DATA_PROCESSING_BUCKET}
